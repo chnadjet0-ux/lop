@@ -1,0 +1,345 @@
+
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Super Mario Adventure</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#68c5ff;
+ font-family:Arial;overflow:hidden;
+ touch-action:none;
+}
+#game{
+ width:100vw;height:100vh;display:block;
+ background:linear-gradient(#65c8ff 0%,#b9edff 75%,#65b64b 75%);
+}
+#hud{
+ position:absolute;top:12px;left:0;width:100%;
+ display:flex;justify-content:space-around;
+ color:white;font-weight:bold;font-size:19px;
+ text-shadow:2px 2px #333;pointer-events:none;
+}
+#controls{
+ position:absolute;bottom:20px;width:100%;
+ display:flex;justify-content:space-between;
+ padding:0 20px;align-items:end;
+}
+.group{display:flex;gap:12px}
+button{
+ border:3px solid white;border-radius:50%;
+ width:65px;height:65px;background:#222a;color:white;
+ font-size:27px;font-weight:bold;
+ touch-action:none;
+}
+#jump{background:#e83b32}
+#message{
+ position:absolute;top:43%;width:100%;
+ text-align:center;font-size:28px;font-weight:bold;
+ color:white;text-shadow:2px 3px #333;
+ pointer-events:none;
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <span>🍄 MARIO</span>
+ <span>🪙 <b id="coins">0</b></span>
+ <span>❤️ <b id="lives">3</b></span>
+ <span>⭐ <b id="score">0</b></span>
+</div>
+<div id="message">SUPER MARIO ADVENTURE</div>
+<div id="controls">
+ <div class="group">
+  <button id="left">◀</button>
+  <button id="right">▶</button>
+ </div>
+ <button id="jump">⬆</button>
+</div>
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+let W,H;
+function resize(){
+ W=canvas.width=innerWidth;
+ H=canvas.height=innerHeight;
+}
+resize();addEventListener("resize",resize);
+
+const keys={left:false,right:false};
+let coins=0,score=0,lives=3;
+let camera=0,gameOver=false,won=false;
+const gravity=0.65;
+
+const player={
+ x:70,y:100,w:32,h:42,
+ vx:0,vy:0,speed:4.5,
+ jump:-13,ground:false
+};
+
+let platforms=[
+ {x:0,y: H-65,w:650,h:65},
+ {x:730,y:H-65,w:450,h:65},
+ {x:1250,y:H-65,w:550,h:65},
+ {x:400,y:H-180,w:120,h:22},
+ {x:850,y:H-190,w:130,h:22},
+ {x:1100,y:H-260,w:130,h:22},
+ {x:1500,y:H-180,w:150,h:22}
+];
+
+let coinItems=[];
+for(let i=0;i<22;i++){
+ coinItems.push({
+  x:180+i*90,
+  y:H-130-(i%3)*45,
+  taken:false
+ });
+}
+let enemies=[
+ {x:350,y:H-105,vx:1.5,alive:true},
+ {x:900,y:H-105,vx:1.8,alive:true},
+ {x:1450,y:H-105,vx:2,alive:true}
+];
+
+const worldEnd=1800;
+const flag={x:worldEnd-100,y:H-220};
+
+function bindButton(id,key){
+ const b=document.getElementById(id);
+ b.addEventListener("pointerdown",e=>{
+  e.preventDefault();keys[key]=true;
+ });
+ ["pointerup","pointercancel","pointerleave"].forEach(ev=>{
+  b.addEventListener(ev,()=>keys[key]=false);
+ });
+}
+bindButton("left","left");
+bindButton("right","right");
+
+document.getElementById("jump").addEventListener("pointerdown",e=>{
+ e.preventDefault();
+ if(player.ground&&!gameOver&&!won){
+  player.vy=player.jump;
+  player.ground=false;
+ }
+});
+
+function rect(x,y,w,h,color){
+ ctx.fillStyle=color;
+ ctx.fillRect(x-camera,y,w,h);
+}
+
+function drawPlayer(){
+ const x=player.x-camera,y=player.y;
+ // body
+ ctx.fillStyle="#e82d22";
+ ctx.fillRect(x+5,y,23,13);
+ ctx.fillRect(x,y+12,32,9);
+ // face
+ ctx.fillStyle="#ffc18c";
+ ctx.fillRect(x+6,y+20,22,13);
+ // hair
+ ctx.fillStyle="#623018";
+ ctx.fillRect(x+3,y+18,7,15);
+ // eyes
+ ctx.fillStyle="#111";
+ ctx.fillRect(x+22,y+22,3,4);
+ // clothes
+ ctx.fillStyle="#1454c5";
+ ctx.fillRect(x+4,y+32,24,10);
+ ctx.fillRect(x,y+35,8,7);
+ ctx.fillRect(x+24,y+35,8,7);
+ // shoes
+ ctx.fillStyle="#532314";
+ ctx.fillRect(x,y+40,13,5);
+ ctx.fillRect(x+20,y+40,13,5);
+}
+
+function drawWorld(){
+ // clouds
+ for(let i=0;i<9;i++){
+  let x=i*260-camera*.4;
+  ctx.fillStyle="white";
+  ctx.beginPath();
+  ctx.arc(x+50,100,22,0,Math.PI*2);
+  ctx.arc(x+75,90,28,0,Math.PI*2);
+  ctx.arc(x+105,102,22,0,Math.PI*2);
+  ctx.fill();
+ }
+ // hills
+ for(let i=0;i<8;i++){
+  let x=i*300-camera*.7;
+  ctx.fillStyle="#48b94b";
+  ctx.beginPath();
+  ctx.arc(x+100,H-65,95,Math.PI,0);
+  ctx.fill();
+ }
+ // platforms
+ platforms.forEach(p=>{
+  rect(p.x,p.y,p.w,p.h,"#a45b27");
+  rect(p.x,p.y,p.w,8,"#39b83d");
+  for(let x=10;x<p.w;x+=35){
+   rect(p.x+x,p.y+18,3,p.h-18,"#6b361d");
+  }
+ });
+ // coins
+ coinItems.forEach(c=>{
+  if(!c.taken){
+   ctx.fillStyle="#ffdc21";
+   ctx.beginPath();
+   ctx.arc(c.x-camera,c.y,10,0,Math.PI*2);
+   ctx.fill();
+   ctx.strokeStyle="#f99c00";
+   ctx.lineWidth=3;ctx.stroke();
+  }
+ });
+ // enemies
+ enemies.forEach(e=>{
+  if(!e.alive){
+   return;
+  }
+  let x=e.x-camera;
+  ctx.fillStyle="#9b4c24";
+  ctx.beginPath();
+  ctx.ellipse(x+15,e.y+17,17,15,0,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle="white";
+  ctx.fillRect(x+6,e.y+10,7,7);
+  ctx.fillRect(x+20,e.y+10,7,7);
+  ctx.fillStyle="black";
+  ctx.fillRect(x+10,e.y+12,3,4);
+  ctx.fillRect(x+23,e.y+12,3,4);
+  ctx.fillStyle="#333";
+  ctx.fillRect(x+4,e.y+29,10,5);
+  ctx.fillRect(x+19,e.y+29,10,5);
+ });
+ // finish flag
+ rect(flag.x,flag.y,8,155,"#eee");
+ ctx.fillStyle="#21c94c";
+ ctx.beginPath();
+ ctx.moveTo(flag.x-camera+8,flag.y);
+ ctx.lineTo(flag.x-camera+75,flag.y+25);
+ ctx.lineTo(flag.x-camera+8,flag.y+50);
+ ctx.fill();
+}
+
+function collide(a,b){
+ return a.x<b.x+b.w&&a.x+a.w>b.x&&
+ a.y<b.y+b.h&&a.y+a.h>b.y;
+}
+
+function update(){
+ if(gameOver||won)return;
+
+ player.vx=0;
+ if(keys.left)player.vx=-player.speed;
+ if(keys.right)player.vx=player.speed;
+ player.x+=player.vx;
+ player.vy+=gravity;
+ let oldY=player.y;
+ player.y+=player.vy;
+ player.ground=false;
+
+ platforms.forEach(p=>{
+  if(player.x+player.w>p.x&&player.x<p.x+p.w&&
+   oldY+player.h<=p.y&&player.y+player.h>=p.y&&
+   player.vy>=0){
+   player.y=p.y-player.h;
+   player.vy=0;
+   player.ground=true;
+  }
+ });
+
+ // coin collection
+ coinItems.forEach(c=>{
+  if(!c.taken&&
+   Math.abs(player.x+16-c.x)<25&&
+   Math.abs(player.y+20-c.y)<35){
+   c.taken=true;coins++;score+=100;
+  }
+ });
+
+ // enemy movement
+ enemies.forEach(e=>{
+  if(!e.alive)return;
+  e.x+=e.vx;
+  if(e.x<250||e.x>worldEnd-200)e.vx*=-1;
+
+  let a={x:player.x,y:player.y,w:player.w,h:player.h};
+  let b={x:e.x,y:e.y,w:32,h:34};
+  if(collide(a,b)){
+   if(player.vy>1&&player.y+player.h<e.y+22){
+    e.alive=false;
+    player.vy=-8;
+    score+=200;
+   }else{
+    lives--;
+    player.x=Math.max(70,player.x-90);
+    player.vy=-7;
+    if(lives<=0)gameOver=true;
+   }
+  }
+ });
+
+ if(player.y>H+100){
+  lives--;
+  player.x=Math.max(70,player.x-100);
+  player.y=100;player.vy=0;
+  if(lives<=0)gameOver=true;
+ }
+
+ player.x=Math.max(0,Math.min(worldEnd-player.w,player.x));
+ camera=Math.max(0,Math.min(worldEnd-W,player.x-W*.4));
+
+ if(player.x>flag.x)won=true;
+
+ document.getElementById("coins").textContent=coins;
+ document.getElementById("lives").textContent=lives;
+ document.getElementById("score").textContent=score;
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ drawWorld();
+ drawPlayer();
+
+ if(gameOver||won){
+  ctx.fillStyle="#0009";
+  ctx.fillRect(0,0,W,H);
+  ctx.textAlign="center";
+  ctx.fillStyle="white";
+  ctx.font="bold 35px Arial";
+  ctx.fillText(gameOver?"GAME OVER":"YOU WIN!",W/2,H/2);
+  ctx.font="20px Arial";
+  ctx.fillText("اضغط لإعادة اللعب",W/2,H/2+45);
+ }
+}
+
+function loop(){
+ update();
+ draw();
+ requestAnimationFrame(loop);
+}
+loop();
+
+function restart(){
+ coins=0;score=0;lives=3;
+ camera=0;gameOver=false;won=false;
+ player.x=70;player.y=100;
+ player.vx=0;player.vy=0;
+ coinItems.forEach(c=>c.taken=false);
+ enemies.forEach((e,i)=>{
+  e.alive=true;
+  e.x=[350,900,1450][i];
+ });
+ document.getElementById("message").textContent="";
+}
+canvas.addEventListener("pointerdown",()=>{
+ if(gameOver||won)restart();
+});
+</script>
+</body>
+</html>
